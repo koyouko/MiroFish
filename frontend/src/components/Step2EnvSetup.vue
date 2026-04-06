@@ -952,7 +952,11 @@ const fetchProfilesRealtime = async () => {
 }
 
 // 配置轮询
+let configErrorCount = 0
+const MAX_CONFIG_ERRORS = 10
+
 const startConfigPolling = () => {
+  configErrorCount = 0
   configTimer = setInterval(fetchConfigRealtime, 2000)
 }
 
@@ -971,7 +975,17 @@ const fetchConfigRealtime = async () => {
     
     if (res.success && res.data) {
       const data = res.data
-      
+      configErrorCount = 0
+
+      // Stop polling if backend reported a failure
+      if (data.failed || data.generation_stage === 'failed') {
+        const errorMsg = data.error || 'Unknown error'
+        addLog(`❌ Config generation failed: ${errorMsg}`)
+        stopConfigPolling()
+        emit('update-status', 'failed')
+        return
+      }
+
       // 输出配置生成阶段日志（避免重复）
       if (data.generation_stage && data.generation_stage !== lastLoggedConfigStage) {
         lastLoggedConfigStage = data.generation_stage
@@ -1016,6 +1030,12 @@ const fetchConfigRealtime = async () => {
     }
   } catch (err) {
     console.warn('获取 Config 失败:', err)
+    configErrorCount++
+    if (configErrorCount >= MAX_CONFIG_ERRORS) {
+      addLog(`❌ Config generation failed: Too many consecutive polling errors`)
+      stopConfigPolling()
+      emit('update-status', 'failed')
+    }
   }
 }
 

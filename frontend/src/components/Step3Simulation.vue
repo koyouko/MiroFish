@@ -465,8 +465,11 @@ const handleStopSimulation = async () => {
 // 轮询状态
 let statusTimer = null
 let detailTimer = null
+let statusErrorCount = 0
+const MAX_STATUS_ERRORS = 10
 
 const startStatusPolling = () => {
+  statusErrorCount = 0
   statusTimer = setInterval(fetchRunStatus, 2000)
 }
 
@@ -497,9 +500,18 @@ const fetchRunStatus = async () => {
     
     if (res.success && res.data) {
       const data = res.data
-      
+      statusErrorCount = 0
       runStatus.value = data
-      
+
+      // Stop polling if backend reported a failure
+      if (data.runner_status === 'failed') {
+        const errorMsg = data.error || 'Unknown error'
+        addLog(`❌ Simulation failed: ${errorMsg}`)
+        stopPolling()
+        emit('update-status', 'failed')
+        return
+      }
+
       // 分别检测各平台的轮次变化并输出日志
       if (data.twitter_current_round > prevTwitterRound.value) {
         addLog(`[Plaza] R${data.twitter_current_round}/${data.total_rounds} | T:${data.twitter_simulated_hours || 0}h | A:${data.twitter_actions_count}`)
@@ -530,6 +542,12 @@ const fetchRunStatus = async () => {
     }
   } catch (err) {
     console.warn('获取运行状态失败:', err)
+    statusErrorCount++
+    if (statusErrorCount >= MAX_STATUS_ERRORS) {
+      addLog(`❌ Simulation failed: Too many consecutive polling errors`)
+      stopPolling()
+      emit('update-status', 'failed')
+    }
   }
 }
 

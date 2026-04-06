@@ -608,7 +608,17 @@ class SimulationRunner:
         try:
             with open(log_path, 'r', encoding='utf-8') as f:
                 f.seek(position)
-                for line in f:
+                # Only advance safe_position after reading a complete
+                # newline-terminated line. Partial lines (writer mid-flush)
+                # are left unread for the next poll cycle to prevent data loss.
+                safe_position = position
+                while True:
+                    line = f.readline()
+                    if not line:
+                        break  # EOF
+                    if not line.endswith('\n'):
+                        break  # incomplete line — retry next poll
+                    safe_position = f.tell()
                     line = line.strip()
                     if line:
                         try:
@@ -684,7 +694,7 @@ class SimulationRunner:
                             
                         except json.JSONDecodeError:
                             pass
-                return f.tell()
+                return safe_position
         except Exception as e:
             logger.warning(f"读取动作日志失败: {log_path}, error={e}")
             return position
